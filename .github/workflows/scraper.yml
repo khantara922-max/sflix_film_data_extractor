@@ -2,7 +2,7 @@ name: Scrape Sflix TV Shows
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # runs every 6 hours
+    - cron: "0 */6 * * *"   # runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
   workflow_dispatch:          # allows manual trigger from GitHub UI
     inputs:
       pages:
@@ -10,37 +10,57 @@ on:
         required: false
         default: "10"
 
+# ── REQUIRED: allow the workflow to push back to the repo ──────────────────
+permissions:
+  contents: write
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Check out the repo so the scraper can read/write JSON files in it
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # fetch-depth 1 is the default; explicit for clarity
+          fetch-depth: 1
 
+      # 2. Set up Python 3.11
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3. Install the only third-party dependency
       - name: Install dependencies
         run: pip install requests
 
+      # 4. Run the scraper
+      #    SCRAPER_PAGES comes from workflow_dispatch input (manual run)
+      #    or falls back to "10" for scheduled runs.
       - name: Run scraper
         env:
           SCRAPER_PAGES: ${{ github.event.inputs.pages || '10' }}
         run: python scraper.py
 
+      # 5. Check whether any of the JSON output files actually changed.
+      #    The scraper writes three files:
+      #      - sflix_tv_shows.json           (full merged dataset)
+      #      - sflix_tv_shows_latest.json    (this-run snapshot)
+      #      - sflix_tv_shows_YYYY-MM-DD.json (dated snapshot)
+      #    We stage all of them and let `git diff --cached` decide.
       - name: Check for changes
         id: changes
         run: |
-          git diff --quiet sflix_tv_shows*.json || echo "changed=true" >> $GITHUB_OUTPUT
+          git add sflix_tv_shows*.json
+          git diff --cached --quiet || echo "changed=true" >> "$GITHUB_OUTPUT"
 
+      # 6. Commit and push — only when there is something new.
       - name: Commit and push updated data
         if: steps.changes.outputs.changed == 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add sflix_tv_shows*.json
           git commit -m "chore: update sflix TV shows [$(date -u '+%Y-%m-%d %H:%M UTC')]"
           git push
