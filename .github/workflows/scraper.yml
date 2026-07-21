@@ -22,7 +22,7 @@ on:
     branches:
       - main
     paths:
-      - "scripts/scraper.py"
+      - "scraper.py"
       - ".github/workflows/scraper.yml"
       - "requirements.txt"
 
